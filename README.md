@@ -1,4 +1,4 @@
-# WG-7-Algerbraic-Univariat-Attack
+# WG-7-Algerbraic-Basic-and-Fast-Attack
 Lampiran Source Code dan Hasil dari serangan.
 
 Tools :
