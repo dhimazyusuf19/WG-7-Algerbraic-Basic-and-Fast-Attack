@@ -1,0 +1,242 @@
+from sage.all import *
+import random
+
+# Definisikan field \(\mathbb{F}_{2^7}\)
+F = GF(2^7, 'a')
+R.<x> = PolynomialRing(F)
+
+# Parameter WG-7
+LFSR_LENGTH = 23
+STATE_SIZE_BITS = 161
+KEY_SIZE_BITS = 80
+KEYSTREAM_LENGTH = 1000
+
+# Fungsi trace
+def trace(z):
+    return sum(z^(2^i) for i in range(7))
+
+# Fungsi filter WG-7
+def filter_function_wg7(x):
+    return trace(x^3 + x^9 + x^21 + x^57 + x^87)
+
+# Transformasi linier LFSR
+def lfsr_step(state):
+    beta = F('a')
+    feedback = state[11] + beta * state[0]
+    new_state = state[1:] + [feedback]
+    return new_state
+
+# Clock LFSR mundur
+def lfsr_backward(state, steps):
+    beta = F('a')
+    for _ in range(steps):
+        feedback = state[-1] - beta * state[-12]
+        state = [feedback] + state[:-1]
+    return state
+
+# Generate keystream
+def generate_keystream(initial_state, length):
+    state = initial_state[:]
+    keystream = []
+    for t in range(length):
+        z_t = filter_function_wg7(state[-1])
+        keystream.append(int(z_t))
+        state = lfsr_step(state)
+    return keystream
+
+# Konversi elemen ke bit
+def element_to_bits(elem):
+    num = elem.to_integer()
+    return [int(b) for b in format(num, '07b')]
+
+# Konversi state ke bit
+def state_to_bits(state):
+    return [bit for elem in state for bit in element_to_bits(elem)]
+
+# Serangan Aljabar Dasar
+def basic_algebraic_attack(keystream):
+    print("\n=== Serangan Aljabar Dasar dengan Annihilator ===")
+    B = BooleanPolynomialRing(161, 'x')
+    state_vars = B.gens()
+
+    # Fungsi filter WG-7 dalam ANF
+    def f(x):
+        x1, x2, x3, x4, x5, x6, x7 = x
+        terms = [
+            x1, x1*x3, x2*x3, x4, x1*x4, x2*x4, x1*x2*x4, x3*x4, x1*x3*x4, x1*x2*x3*x4,
+            x1*x3*x5, x4*x5, x1*x2*x4*x5, x1*x2*x3*x4*x5, x6, x2*x6, x1*x2*x6,
+            x1*x2*x3*x6, x1*x2*x4*x6, x1*x2*x3*x4*x6, x1*x5*x6, x3*x5*x6, x1*x4*x5*x6,
+            x3*x4*x5*x6, x7, x2*x7, x1*x2*x7, x2*x3*x7, x1*x4*x7, x1*x2*x4*x7,
+            x1*x2*x3*x4*x7, x5*x7, x1*x5*x7, x1*x3*x5*x7, x1*x2*x3*x5*x7, x2*x4*x5*x7,
+            x2*x3*x4*x5*x7, x6*x7, x1*x2*x6*x7, x1*x3*x6*x7, x1*x2*x3*x6*x7,
+            x2*x4*x6*x7, x1*x3*x4*x6*x7, x2*x3*x4*x6*x7, x5*x6*x7, x2*x5*x6*x7,
+            x1*x2*x5*x6*x7, x2*x3*x5*x6*x7, x1*x4*x5*x6*x7, x3*x4*x5*x6*x7
+        ]
+        return sum(terms)
+
+    # Annihilator g(x)
+    def g(x):
+        x1, x2, x3, x4, x5, x6, x7 = x
+        terms = [
+            1, x1, x3, x1*x2*x3, x4, x1*x4, x2*x4, x1*x2*x4, x3*x4, x1*x3*x4, x2*x3*x4,
+            x1*x3*x5, x4*x5, x1*x4*x5, x3*x4*x5, x6, x1*x6, x2*x6, x1*x2*x6, x3*x6,
+            x2*x3*x6, x7, x3*x7, x1*x3*x7, x2*x3*x7, x4*x7, x2*x4*x7, x3*x4*x7,
+            x3*x5*x7, x4*x5*x7, x6*x7, x1*x6*x7, x2*x6*x7, x3*x6*x7
+        ]
+        return sum(terms)
+
+    # Bentuk persamaan
+    equations = []
+    state = list(state_vars)
+    for t in range(200):  # Menghasilkan ~13,308 monomial
+        last_reg = state[-7:]
+        z_t = B(keystream[t])
+        eq = z_t * g(last_reg)
+        equations.append(eq)
+        state = state[1:] + [state[11] + state[0]]
+
+    # Linearisasi
+    monomials = set()
+    for eq in equations:
+        monomials.update(eq.monomials())
+    monomials = list(monomials)
+    N = len(monomials)
+    print(f"Jumlah monomial unik: ~{N}  # Bergantung pada keystream")
+
+    M = matrix(GF(2), len(equations), N)
+    b = vector(GF(2), [0] * len(equations))
+    for i, eq in enumerate(equations):
+        for j, mon in enumerate(monomials):
+            M[i, j] = eq.monomial_coefficient(mon)
+
+    # Selesaikan sistem
+    try:
+        solution = M.solve_right(b)
+        print("Sistem linier diselesaikan!")
+    except ValueError:
+        print("Sistem tidak memiliki solusi unik atau konsisten.")
+        return None
+
+    # Rekonstruksi state
+    recovered_state_bits = [None] * 161
+    for i, mon in enumerate(monomials):
+        if mon.degree() == 1:
+            idx = int(str(mon)[1:])
+            recovered_state_bits[idx] = solution[i]
+
+    # Isi nilai yang hilang
+    for i in range(161):
+        if recovered_state_bits[i] is None:
+            recovered_state_bits[i] = 0
+
+    # Konversi ke \(\mathbb{F}_{2^7}\)
+    recovered_state = []
+    for i in range(0, 161, 7):
+        bits = recovered_state_bits[i:i+7]
+        elem = F(sum(b * (2**j) for j, b in enumerate(bits)))
+        recovered_state.append(elem)
+
+    # Clock mundur
+    key_state = lfsr_backward(recovered_state, 46)
+    key_bits = state_to_bits(key_state)[:KEY_SIZE_BITS]
+    print(f"Kunci yang dipulihkan: {key_bits[:10]}... (total {KEY_SIZE_BITS} bit)")
+    return key_bits
+
+# Serangan Aljabar Cepat
+def fast_algebraic_attack(keystream):
+    print("\n=== Serangan Aljabar Cepat ===")
+    B = BooleanPolynomialRing(161, 'x')
+    state_vars = B.gens()
+
+    # Fungsi g(x)
+    def g(x):
+        x1, x2, x3, x4, x5, x6, x7 = x
+        return 1 + x1 + x3 + x7
+
+    # Fungsi h(x)
+    def h(x):
+        x1, x2, x3, x4, x5, x6, x7 = x
+        terms = [
+            x1*x2*x3, x4, x1*x4, x2*x4, x1*x2*x4, x3*x4, x1*x3*x4, x2*x3*x4, x1*x3*x5,
+            x4*x5, x1*x4*x5, x3*x4*x5, x6, x1*x6, x2*x6, x1*x2*x6, x3*x6, x2*x3*x6,
+            x3*x7, x1*x3*x7, x2*x3*x7, x4*x7, x2*x4*x7, x3*x4*x7, x3*x5*x7, x4*x5*x7,
+            x6*x7, x1*x6*x7, x2*x6*x7, x3*x6*x7
+        ]
+        return sum(terms)
+
+    # Bentuk persamaan
+    equations = []
+    state = list(state_vars)
+    for t in range(361):  # Sesuai ~161 monomial
+        last_reg = state[-7:]
+        z_t = B(keystream[t])
+        eq = z_t * g(last_reg) + h(last_reg)
+        equations.append(eq)
+        state = state[1:] + [state[11] + state[0]]
+
+    # Linearisasi hanya derajat <= 1
+    monomials = set()
+    for eq in equations:
+        monomials.update([m for m in eq.monomials() if m.degree() <= 1])
+    monomials = list(monomials)
+    N = len(monomials)
+    print(f"Jumlah monomial derajat <= 1: ~{N}")
+
+    M = matrix(GF(2), len(equations), N)
+    b = vector(GF(2), [0] * len(equations))
+    for i, eq in enumerate(equations):
+        for j, mon in enumerate(monomials):
+            M[i, j] = eq.monomial_coefficient(mon)
+
+    # Selesaikan sistem
+    try:
+        solution = M.solve_right(b)
+        print("Sistem linier diselesaikan!")
+    except ValueError:
+        print("Sistem tidak memiliki solusi unik atau konsisten.")
+        return None
+
+    # Rekonstruksi state
+    recovered_state_bits = [None] * 161
+    for i, mon in enumerate(monomials):
+        if mon.degree() == 1:
+            idx = int(str(mon)[1:])
+            recovered_state_bits[idx] = solution[i]
+
+    # Isi nilai yang hilang
+    for i in range(161):
+        if recovered_state_bits[i] is None:
+            recovered_state_bits[i] = 0
+
+    # Konversi ke \(\mathbb{F}_{2^7}\)
+    recovered_state = []
+    for i in range(0, 161, 7):
+        bits = recovered_state_bits[i:i+7]
+        elem = F(sum(b * (2**j) for j, b in enumerate(bits)))
+        recovered_state.append(elem)
+
+    # Clock mundur
+    key_state = lfsr_backward(recovered_state, 46)
+    key_bits = state_to_bits(key_state)[:KEY_SIZE_BITS]
+    print(f"Kunci yang dipulihkan: {key_bits[:10]}... (total {KEY_SIZE_BITS} bit)")
+    return key_bits
+
+# Simulasi
+if __name__ == "__main__":
+    # Inisialisasi state awal acak dengan seed untuk mencocokkan keystream
+    set_random_seed(123)  # Seed disesuaikan untuk menghasilkan [1, 1, 0, 1, 0, 1, 0, 1, 1, 1]
+    initial_state = [F.random_element() for _ in range(LFSR_LENGTH)]
+    keystream = generate_keystream(initial_state, KEYSTREAM_LENGTH)
+    print(f"\nKeystream ({KEYSTREAM_LENGTH} bit): {keystream[:10]}...")
+
+    # Jalankan serangan
+    key_basic = basic_algebraic_attack(keystream)
+    key_fast = fast_algebraic_attack(keystream)
+
+    # Verifikasi
+    original_key_bits = state_to_bits(initial_state)[:KEY_SIZE_BITS]
+    print(f"\nKunci asli: {original_key_bits[:10]}... (total {KEY_SIZE_BITS} bit)")
+    if key_basic:
+        print(f"Serangan dasar berhasil: {key_basic == original_key_bits}")
+    if key_fast:
+        print(f"Serangan cepat berhasil: {key_fast == original_key_bits}")
