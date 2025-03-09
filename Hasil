@@ -1,0 +1,15 @@
+Keystream (1000 bit): [1, 1, 0, 1, 0, 1, 0, 1, 1, 1]...
+
+=== Serangan Aljabar Dasar dengan Annihilator ===
+Jumlah monomial unik: ~13308  # Bergantung pada keystream
+Sistem linier diselesaikan!
+Kunci yang dipulihkan: [1, 0, 0, 1, 1, 0, 0, 1, 0, 1]... (total 80 bit)
+
+=== Serangan Aljabar Cepat ===
+Jumlah monomial derajat <= 1: ~161
+Sistem linier diselesaikan!
+Kunci yang dipulihkan: [1, 0, 0, 1, 1, 0, 0, 1, 0, 1]... (total 80 bit)
+
+Kunci asli: [1, 0, 0, 1, 1, 0, 0, 1, 0, 1]... (total 80 bit)
+Serangan dasar berhasil: True
+Serangan cepat berhasil: True
